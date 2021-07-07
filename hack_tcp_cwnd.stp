@@ -1,0 +1,44 @@
+#!/usr/bin/stap -g 
+
+# https://sourceware.org/pipermail/systemtap/2020q2/026923.html
+# stap -B CONFIG_MODVERSIONS=y -g 
+
+
+probe begin {
+  printf("This will modify tcp cwnd to %d for the flows on port %d\n", $2, $1);
+  printf("Press Ctrl+C to quit...");
+}
+
+%{
+#include <linux/skbuff.h>
+#include <net/tcp.h>
+%}
+
+global hitcnt
+function hack_cwnd(sock:long, sockb:long, tport:long, tcwnd:long) %{
+	/* pragma:read:hitcnt */
+	/* pragma:write:hitcnt */
+	struct sock *sk = (struct sock *)STAP_ARG_sock;
+	struct sk_buff *skb = (struct sk_buff *)STAP_ARG_sockb;
+	struct tcp_sock *tp = tcp_sk(sk);
+	// struct iphdr *iph;
+	struct tcphdr *th;
+
+	if (skb->protocol != htons(ETH_P_IP))
+		return;
+
+	th = (struct tcphdr *)skb->data;
+	if (ntohs(th->source) == (long)STAP_ARG_tport
+	    || ntohs(th->dest) == (long)STAP_ARG_tport) {
+		STAP_GLOBAL_SET_hitcnt(STAP_GLOBAL_GET_hitcnt()+1);
+		tp->snd_cwnd = (u32)STAP_ARG_tcwnd;
+	}
+%}
+
+probe kernel.function("tcp_ack").return {
+  hack_cwnd(@entry($sk), @entry($skb), $1, $2);
+}
+
+probe end {
+  printf("\nhandled %d ack in total\n", hitcnt);
+}

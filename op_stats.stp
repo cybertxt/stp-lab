@@ -1,0 +1,12 @@
+global ops
+
+probe kernel.function(@1) {
+	ops[execname()]++;
+}
+
+probe timer.s($2) {
+	foreach (r in ops) {
+		printf("%s: %d\n", r, ops[r]);
+	}
+	exit();
+}

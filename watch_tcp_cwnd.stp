@@ -1,0 +1,27 @@
+#!/usr/bin/stap -v
+
+probe begin {
+ printf("start watching, press Ctrl+C to get the result...\n");
+}
+
+global hit_cnt
+global cwnd_stat
+function watch(sock:long, sockb:long, tport:long) {
+  tcphdr = __get_skb_tcphdr(sockb);
+  if (__tcp_skb_sport(tcphdr) == tport
+      || __tcp_skb_dport(tcphdr) == tport) {
+    hit_cnt += 1;
+	cwnd_stat <<< tcp_get_info_snd_cwnd(sock);
+  }
+}
+
+probe kernel.function("tcp_ack").return {
+  watch(@entry($sk), @entry($skb), $1);
+}
+
+probe end {
+  printf("\nhandled %d ack in total\n", hit_cnt);
+  if (@count(cwnd_stat) > 0)
+    #print(@hist_log(cwnd_stat))
+    print(@hist_linear(cwnd_stat, 0, 5000, 200));
+}
